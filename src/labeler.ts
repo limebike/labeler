@@ -1,6 +1,7 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import * as yaml from "js-yaml";
+import {getCodeOwnersFromPaths} from './getCodeOwnersFromPaths'
 import { Minimatch, IMinimatch } from "minimatch";
 
 interface MatchConfig {
@@ -31,8 +32,10 @@ export async function run() {
       pull_number: prNumber,
     });
 
-    core.debug(`fetching changed files for pr #${prNumber}`);
+    core.debug(`fetching changed files for PR #${prNumber}`);
     const changedFiles: string[] = await getChangedFiles(client, prNumber);
+    core.debug("fetching codeowners");
+    const owners: string[] = await getCodeOwnersFromPaths(changedFiles);
     const labelGlobs: Map<string, StringOrMatchConfig[]> = await getLabelGlobs(
       client,
       configPath
@@ -42,7 +45,7 @@ export async function run() {
     const labelsToRemove: string[] = [];
     for (const [label, globs] of labelGlobs.entries()) {
       core.debug(`processing ${label}`);
-      if (checkGlobs(changedFiles, globs)) {
+      if (checkGlobs(owners, globs)) {
         labels.push(label);
       } else if (pullRequest.labels.find((l) => l.name === label)) {
         labelsToRemove.push(label);
@@ -156,13 +159,13 @@ function printPattern(matcher: IMinimatch): string {
 }
 
 export function checkGlobs(
-  changedFiles: string[],
+  codeowners: string[],
   globs: StringOrMatchConfig[]
 ): boolean {
   for (const glob of globs) {
     core.debug(` checking pattern ${JSON.stringify(glob)}`);
     const matchConfig = toMatchConfig(glob);
-    if (checkMatch(changedFiles, matchConfig)) {
+    if (checkMatch(codeowners, matchConfig)) {
       return true;
     }
   }
@@ -188,6 +191,7 @@ function checkAny(changedFiles: string[], globs: string[]): boolean {
   const matchers = globs.map((g) => new Minimatch(g));
   core.debug(`  checking "any" patterns`);
   for (const changedFile of changedFiles) {
+    core.debug(` checking ${changedFile}`)
     if (isMatch(changedFile, matchers)) {
       core.debug(`  "any" patterns matched against ${changedFile}`);
       return true;
@@ -213,15 +217,15 @@ function checkAll(changedFiles: string[], globs: string[]): boolean {
   return true;
 }
 
-function checkMatch(changedFiles: string[], matchConfig: MatchConfig): boolean {
+function checkMatch(codeowners: string[], matchConfig: MatchConfig): boolean {
   if (matchConfig.all !== undefined) {
-    if (!checkAll(changedFiles, matchConfig.all)) {
+    if (!checkAll(codeowners, matchConfig.all)) {
       return false;
     }
   }
 
   if (matchConfig.any !== undefined) {
-    if (!checkAny(changedFiles, matchConfig.any)) {
+    if (!checkAny(codeowners, matchConfig.any)) {
       return false;
     }
   }
